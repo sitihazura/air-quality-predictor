@@ -42,6 +42,20 @@ CITY_COUNTRY_MAP = {
     "Tokyo": "Japan",
 }
 
+# Approximate coordinates for the cities in the dataset (used for the map)
+CITY_COORDS = {
+    "Beijing": (39.9042, 116.4074),
+    "Cairo": (30.0444, 31.2357),
+    "Delhi": (28.7041, 77.1025),
+    "London": (51.5074, -0.1278),
+    "Los Angeles": (34.0522, -118.2437),
+    "New York": (40.7128, -74.0060),
+    "Paris": (48.8566, 2.3522),
+    "Sydney": (-33.8688, 151.2093),
+    "São Paulo": (-23.5505, -46.6333),
+    "Tokyo": (35.6762, 139.6503),
+}
+
 MONTH_NAMES = [
     "January", "February", "March", "April", "May", "June",
     "July", "August", "September", "October", "November", "December"
@@ -62,16 +76,22 @@ st.divider()
 # ------------------------------------------------------------
 st.subheader("Input Conditions")
 
-col1, col2 = st.columns(2)
+form_col, map_col = st.columns([1.2, 1])
 
-with col1:
+with form_col:
     city = st.selectbox("City", options=unique_cities, index=0)
     country = CITY_COUNTRY_MAP.get(city, "Unknown")
     st.text_input("Country", value=country, disabled=True)
 
-with col2:
     month_name = st.selectbox("Month", options=MONTH_NAMES, index=0)
     month = MONTH_NAMES.index(month_name) + 1
+
+with map_col:
+    if city in CITY_COORDS:
+        lat, lon = CITY_COORDS[city]
+        map_df = pd.DataFrame({"lat": [lat], "lon": [lon]})
+        st.map(map_df, zoom=3, size=200)
+    st.caption(f"📍 {city}, {country}")
 
 st.markdown("**Pollutant Levels**")
 p1, p2, p3 = st.columns(3)
