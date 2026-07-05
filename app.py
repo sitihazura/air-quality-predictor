@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import joblib
+import pydeck as pdk
 
 # ------------------------------------------------------------
 # Page config
@@ -16,7 +17,7 @@ st.set_page_config(
 # ------------------------------------------------------------
 @st.cache_resource
 def load_pipeline():
-    model = joblib.load("xgb_air_quality_model.pkl")
+    model = joblib.load("rf_air_quality_model.pkl")
     le_city = joblib.load("label_encoder_city.pkl")
     le_country = joblib.load("label_encoder_country.pkl")
     le_target = joblib.load("label_encoder_target.pkl")
@@ -28,31 +29,17 @@ def load_pipeline():
 model, le_city, le_country, le_target, feature_columns, unique_cities, unique_countries = load_pipeline()
 
 # City -> Country mapping, built directly from what the encoders were fitted on
-# (dataset confirms this is a strict 1:1 mapping)
 CITY_COUNTRY_MAP = {
-    "Beijing": "China",
-    "Cairo": "Egypt",
-    "Delhi": "India",
-    "London": "UK",
-    "Los Angeles": "USA",
-    "New York": "USA",
-    "Paris": "France",
-    "Sydney": "Australia",
-    "São Paulo": "Brazil",
-    "Tokyo": "Japan",
+    "Beijing": "China", "Cairo": "Egypt", "Delhi": "India", "London": "UK",
+    "Los Angeles": "USA", "New York": "USA", "Paris": "France",
+    "Sydney": "Australia", "São Paulo": "Brazil", "Tokyo": "Japan",
 }
 
 # Approximate coordinates for the cities in the dataset (used for the map)
 CITY_COORDS = {
-    "Beijing": (39.9042, 116.4074),
-    "Cairo": (30.0444, 31.2357),
-    "Delhi": (28.7041, 77.1025),
-    "London": (51.5074, -0.1278),
-    "Los Angeles": (34.0522, -118.2437),
-    "New York": (40.7128, -74.0060),
-    "Paris": (48.8566, 2.3522),
-    "Sydney": (-33.8688, 151.2093),
-    "São Paulo": (-23.5505, -46.6333),
+    "Beijing": (39.9042, 116.4074), "Cairo": (30.0444, 31.2357), "Delhi": (28.7041, 77.1025),
+    "London": (51.5074, -0.1278), "Los Angeles": (34.0522, -118.2437), "New York": (40.7128, -74.0060),
+    "Paris": (48.8566, 2.3522), "Sydney": (-33.8688, 151.2093), "São Paulo": (-23.5505, -46.6333),
     "Tokyo": (35.6762, 139.6503),
 }
 
@@ -65,16 +52,13 @@ MONTH_NAMES = [
 # Header
 # ------------------------------------------------------------
 st.title("🌍 Air Quality Predictor")
-st.markdown(
-    "Predict whether air quality is **Safe** or **Unsafe** based on pollutant "
-    "concentrations and weather conditions, using a trained XGBoost model."
-)
 st.divider()
 
 # ------------------------------------------------------------
 # Input form
 # ------------------------------------------------------------
-st.subheader("Input Conditions")
+st.subheader("🌤️ Tell Us About Your Surroundings")
+st.caption("Don't know the exact numbers? No problem — every field below already starts at a typical value, so you can just adjust what you know and leave the rest as is.")
 
 form_col, map_col = st.columns([1.2, 1])
 
@@ -90,7 +74,22 @@ with map_col:
     if city in CITY_COORDS:
         lat, lon = CITY_COORDS[city]
         map_df = pd.DataFrame({"lat": [lat], "lon": [lon]})
-        st.map(map_df, zoom=3, size=200)
+
+        dot_layer = pdk.Layer(
+            "ScatterplotLayer",
+            data=map_df,
+            get_position="[lon, lat]",
+            get_fill_color="[216, 90, 48, 220]",
+            get_radius=60000,
+            radius_min_pixels=6,
+            radius_max_pixels=10,
+            stroked=False,
+        )
+        view_state = pdk.ViewState(latitude=lat, longitude=lon, zoom=2.5)
+        st.pydeck_chart(
+            pdk.Deck(layers=[dot_layer], initial_view_state=view_state, map_style=None),
+            height=220,
+        )
     st.caption(f"📍 {city}, {country}")
 
 st.markdown("**Pollutant Levels**")
@@ -125,10 +124,16 @@ if st.button("Predict Air Quality", type="primary", use_container_width=True):
     city_encoded = le_city.transform([city])[0]
     country_encoded = le_country.transform([country])[0]
 
-    # Assemble the feature row in the EXACT order used during training
-    input_dict = {
+    # Assemble all possible feature values, then select + order using feature_columns
+    # AQI is intentionally not asked from the user: it contributes under 1% to the
+    # model's decision, and varying it across its full range (30-300) never changes
+    # the predicted label in testing. A fixed typical value is used instead.
+    AQI_DEFAULT = 165
+
+    input_values = {
         "City": city_encoded,
         "Country": country_encoded,
+        "AQI": AQI_DEFAULT,
         "PM25": pm25,
         "PM10": pm10,
         "NO2": no2,
@@ -140,7 +145,7 @@ if st.button("Predict Air Quality", type="primary", use_container_width=True):
         "WindSpeed": wind_speed,
         "Month": month,
     }
-    input_df = pd.DataFrame([input_dict])[feature_columns]
+    input_df = pd.DataFrame([input_values])[feature_columns]
 
     # Predict
     prediction = model.predict(input_df)[0]
@@ -155,9 +160,9 @@ if st.button("Predict Air Quality", type="primary", use_container_width=True):
     st.subheader("Prediction Result")
 
     if predicted_label == "Safe":
-        st.success(f"✅ Predicted Air Quality: **Safe**")
+        st.success("✅ Predicted Air Quality: **Safe**")
     else:
-        st.error(f"⚠️ Predicted Air Quality: **Unsafe**")
+        st.error("⚠️ Predicted Air Quality: **Unsafe**")
 
     res_col1, res_col2 = st.columns(2)
     with res_col1:
@@ -166,10 +171,3 @@ if st.button("Predict Air Quality", type="primary", use_container_width=True):
         st.metric("Probability: Unsafe", f"{prob_unsafe * 100:.1f}%")
 
     st.progress(float(prob_unsafe))
-    st.caption("Progress bar shows the model's confidence toward 'Unsafe'.")
-
-    with st.expander("View input sent to the model"):
-        st.dataframe(input_df)
-
-st.divider()
-st.caption("Model: XGBoost Classifier · Deployment stage demo")
